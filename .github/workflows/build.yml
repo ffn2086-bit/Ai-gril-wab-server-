@@ -25,11 +25,11 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Create Android Platform Support
-        run: flutter create . --platforms=android --org com.example.aigirlfriend
-
-      - name: Get Dependencies
-        run: flutter pub get --no-example
+      - name: Enable Android Support & Get Dependencies
+        run: |
+          flutter config --enable-android
+          flutter create . --platforms=android --force
+          flutter pub get --no-example
 
       - name: Build APK Release
         run: flutter build apk --release
