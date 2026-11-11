@@ -12,5 +12,8 @@ dependencies:
   speech_to_text: ^7.0.0
   flutter_tts: ^4.0.0
   audioplayers: ^6.1.0
+  permission_handler: ^11.3.0
+  photo_manager: ^3.0.0
 flutter:
   uses-material-design: true
+  
