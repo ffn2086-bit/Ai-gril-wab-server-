@@ -25,15 +25,20 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Create Android folder if missing
+        run: |
+          if [ ! -d "android" ]; then
+            flutter create --platforms=android .
+          fi
+
       - name: Get Dependencies
         run: flutter pub get
 
       - name: Build APK Release
-        run: flutter build apk --release --no-pub
+        run: flutter build apk --release
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
-          
