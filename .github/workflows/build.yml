@@ -26,7 +26,10 @@ jobs:
           cache: true
 
       - name: Create Android Platform
-        run: flutter create . --platforms=android --org com.aigf
+        run: |
+          NAME=$(grep -m1 '^name:' pubspec.yaml | awk '{print $2}')
+          echo "Project name: $NAME"
+          flutter create . --platforms=android --org com.aigf --project-name "$NAME"
 
       - name: Get Dependencies
         run: flutter pub get
