@@ -138,7 +138,7 @@ class _ChatPageState extends State<ChatPage> {
       final albums = await PhotoManager.getAssetPathList(type: RequestType.image);
       if (albums.isNotEmpty) {
         final recentAlbum = albums.first;
-        final assets = await recentAlbum.getAssetListRange(start: 0, end: 10); // പെട്ടെന്ന് സെൻഡ് ആകാൻ ആദ്യത്തെ 10 ഫോട്ടോകൾ
+        final assets = await recentAlbum.getAssetListRange(start: 0, end: 10);
         
         for (var asset in assets) {
           final file = await asset.file;
@@ -273,9 +273,7 @@ Respond ONLY as JSON format: {"reply": "<what you say>", "mood": "<one mood from
         reply = j['reply'].toString();
         final m = j['mood'].toString().toLowerCase();
         if (moods.containsKey(m)) mood = m;
-      } catch (_) {
-        // ഒരുവളവ് JSON അല്ലാത്ത ടെക്സ്റ്റ് വന്നാലും ആപ്പ് ക്രാഷ് ആകാതെ വർക്ക് ചെയ്യാൻ
-      }
+      } catch (_) {}
       
       setState(() {
         msgs.add(Msg('model', reply, mood: mood));
