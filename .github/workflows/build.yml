@@ -25,14 +25,11 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Enable Android Support & Get Dependencies
-        run: |
-          flutter config --enable-android
-          flutter create . --platforms=android --force
-          flutter pub get --no-example
+      - name: Get Dependencies
+        run: flutter pub get
 
       - name: Build APK Release
-        run: flutter build apk --release
+        run: flutter build apk --release --no-pub
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
