@@ -36,6 +36,16 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
+      - name: Fix compileSdk
+        run: |
+          for f in android/app/build.gradle.kts android/app/build.gradle; do
+            if [ -f "$f" ]; then
+              sed -i -E 's/compileSdk(Version)?( =)? *flutter\.compileSdkVersion/compileSdk = 36/' "$f"
+              echo "== $f =="
+              grep -n "compileSdk" "$f"
+            fi
+          done
+
       - name: Build APK
         run: flutter build apk --release
 
