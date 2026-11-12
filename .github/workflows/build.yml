@@ -36,15 +36,19 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
-      - name: Fix compileSdk
+      - name: Force compileSdk 36 for all plugins
         run: |
-          for f in android/app/build.gradle.kts android/app/build.gradle; do
-            if [ -f "$f" ]; then
-              sed -i -E 's/compileSdk(Version)?( =)? *flutter\.compileSdkVersion/compileSdk = 36/' "$f"
-              echo "== $f =="
-              grep -n "compileSdk" "$f"
-            fi
-          done
+          mkdir -p ~/.gradle
+          cat > ~/.gradle/init.gradle << 'EOF'
+          allprojects {
+            afterEvaluate { p ->
+              if (p.plugins.hasPlugin('com.android.library') || p.plugins.hasPlugin('com.android.application')) {
+                p.android.compileSdkVersion 36
+              }
+            }
+          }
+          EOF
+          cat ~/.gradle/init.gradle
 
       - name: Build APK
         shell: bash
