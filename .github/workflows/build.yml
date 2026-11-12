@@ -30,6 +30,9 @@ jobs:
           echo "Project name: $NAME"
           flutter create . --platforms=android --org com.aigf --project-name "$NAME"
 
+      - name: Upgrade speech_to_text
+        run: flutter pub add speech_to_text
+
       - name: Get Dependencies
         run: flutter pub get
 
